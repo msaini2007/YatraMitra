@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import type { FormEvent, MouseEvent as ReactMouseEvent, TouchEvent as ReactTouchEvent } from 'react'
+import type { FormEvent, TouchEvent as ReactTouchEvent } from 'react'
 import { BrowserRouter, Link, Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom'
 import { CircleMarker, MapContainer, Polyline, Popup, TileLayer, useMap } from 'react-leaflet'
 import {
@@ -9,7 +9,7 @@ import {
   ChevronUp, ExternalLink, LoaderCircle, AlertTriangle,
   ShieldCheck, ShoppingBag, Sparkles, Star, Ticket, UserPlus, Users, Utensils,
   X, Volume2, Route as RouteIcon, Share2, Trash2, Plus, Send,
-  LogIn, LogOut, SlidersHorizontal, Grid3X3, List, Landmark, Mountain,
+  LogIn, LogOut, Grid3X3, List, Landmark, Mountain,
   Eye, Globe2
 } from 'lucide-react'
 import { buddyProfiles, destinations, experiences, hotels, type Destination } from './data'
@@ -17,7 +17,7 @@ import { getImageRecord, type ImageRecord } from './imageData'
 import { localizedContent, translate, type Language } from './i18n'
 import {
   buildItineraryDays, createBudget, fetchDrivingRoute, formatDuration,
-  formatINR, getPlannerCities, getTripDays, getVisitDuration,
+  formatINR, getKnownCityPoint, getPlannerCities, getTripDays, getVisitDuration,
   ACCOMMODATION_PREFERENCES, PLANNER_PREFERENCES, rescheduleExistingDays, selectPlannerDestinations,
   TRANSPORT_MODES, TRAVEL_PACES, TRAVEL_TYPES, validatePlannerForm,
 } from './planner'
@@ -145,6 +145,11 @@ function AppShell() {
     if (storedLanguage !== language) setLanguage(language)
   }, [language, setLanguage, storedLanguage])
 
+  useEffect(() => {
+    document.documentElement.lang = language === 'हिन्दी' ? 'hi' : 'en'
+    document.title = translate(language,'YatraMitra — Explore Rajasthan, Travel Smarter')
+  }, [language])
+
   const notify = (text: string) => {
     setToast({ id: Date.now(), text })
     window.setTimeout(() => setToast(null), 2800)
@@ -159,26 +164,19 @@ function AppShell() {
   return (
     <LanguageContext.Provider value={{ language, setLanguage: (value) => setLanguage(value) }}>
     <div className="app-shell">
+      <a className="skip-link" href="#main-content">{t('Skip to content')}</a>
       <header className="topbar">
         <div className="nav-wrap">
           <Brand />
-          <button className="mobile-menu" onClick={() => setMenuOpen(!menuOpen)} aria-label={t('Toggle navigation')}>
+          <button className="mobile-menu" onClick={() => setMenuOpen(!menuOpen)} aria-label={t('Toggle navigation')} aria-expanded={menuOpen}>
             {menuOpen ? <X /> : <Menu />}
           </button>
-          <nav className={menuOpen ? 'nav-links open' : 'nav-links'}>
+          <nav className={menuOpen ? 'nav-links open' : 'nav-links'} aria-label={t('Main navigation')}>
             <Link to="/" onClick={() => setMenuOpen(false)}>{t('Home')}</Link>
             <Link to="/explore" onClick={() => setMenuOpen(false)}>{t('Explore')}</Link>
             <Link to="/planner" onClick={() => setMenuOpen(false)}>{t('Smart Trip Planner')}</Link>
             <Link to="/buddies" onClick={() => setMenuOpen(false)}>{t('Travel Buddy')}</Link>
             <Link to="/experiences" onClick={() => setMenuOpen(false)}>{t('Local Experiences')}</Link>
-            <label className="language-select mobile-language-select">
-              <Languages size={16} aria-hidden="true" />
-              <span>{t('Display language')}</span>
-              <select aria-label={t('Display language')} value={language} onChange={(e) => setLanguage(e.target.value as Language)}>
-                <option>English</option><option>हिन्दी</option>
-              </select>
-              <ChevronDown size={14} aria-hidden="true" />
-            </label>
           </nav>
           <div className="nav-actions">
             <label className="language-select">
@@ -197,7 +195,7 @@ function AppShell() {
         </div>
       </header>
 
-      <main>
+      <main id="main-content">
         <Routes>
           <Route path="/" element={<Home notify={notify} />} />
           <Route path="/explore" element={<Explore />} />
@@ -207,6 +205,10 @@ function AppShell() {
           <Route path="/buddies" element={<TravelBuddies notify={notify} />} />
           <Route path="/experiences" element={<LocalExperiences />} />
           <Route path="/hotels" element={<HotelsPage />} />
+          <Route path="/about" element={<InformationPage page="about" />} />
+          <Route path="/privacy" element={<InformationPage page="privacy" />} />
+          <Route path="/terms" element={<InformationPage page="terms" />} />
+          <Route path="/feedback" element={<FeedbackPage notify={notify} />} />
           <Route path="/login" element={<AuthPage mode="login" notify={notify} />} />
           <Route path="/signup" element={<AuthPage mode="signup" notify={notify} />} />
           <Route path="/forgot" element={<AuthPage mode="forgot" notify={notify} />} />
@@ -215,6 +217,7 @@ function AppShell() {
         </Routes>
       </main>
 
+      <Footer />
       {toast && <div className="toast" key={toast.id}><Check size={18} /> {toast.text}</div>}
     </div>
     </LanguageContext.Provider>
@@ -227,10 +230,16 @@ function Home({ notify }: { notify: (text:string)=>void }) {
   const [search, setSearch] = useState('')
   const [date, setDate] = useState('')
   const [travellers, setTravellers] = useState('2')
+  const [today] = useState(() => new Date().toISOString().slice(0, 10))
+  const [saved, setSaved] = useStored<string[]>('ym-saved-destinations', [])
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
-    navigate(`/explore${search ? `?q=${encodeURIComponent(search)}` : ''}`)
+    const query = new URLSearchParams()
+    if (search.trim()) query.set('destination', search.trim())
+    if (date) query.set('date', date)
+    query.set('travelers', travellers)
+    navigate(`/planner?${query.toString()}`)
   }
 
   const categories = [
@@ -253,11 +262,12 @@ function Home({ notify }: { notify: (text:string)=>void }) {
           <h1>{t('Discover Rajasthan')}<br /><em>{t('Like Never Before')}</em></h1>
           <p>{t('Your smart companion for heritage, culture, food and unforgettable journeys.')}</p>
           <form className="search-box" onSubmit={submit}>
-            <label><span>{t('Where to?')}</span><div><MapPin size={18}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder={t('Search a destination')} /></div></label>
-            <label><span>{t('Travel date')}</span><div><CalendarDays size={18}/><input type="date" aria-label={t('Travel date')} value={date} onChange={e=>setDate(e.target.value)} /></div></label>
-            <label><span>{t('Travellers')}</span><div><Users size={18}/><select aria-label={t('Travellers')} value={travellers} onChange={e=>setTravellers(e.target.value)}><option value="1">{t('1 Guest')}</option><option value="2">{t('2 Guests')}</option><option value="3">{t('3 Guests')}</option><option value="4">{t('4 Guests')}</option><option value="6">{t('5+ Guests')}</option></select></div></label>
+            <label><span>{t('Where to?')}</span><div><MapPin size={18}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder={t('Search a destination')} list="home-destinations" /><datalist id="home-destinations">{[...new Set(destinations.flatMap((destination) => [destination.city, destination.name]))].map((name) => <option value={name} key={name}/>)}</datalist></div></label>
+            <label><span>{t('Travel date')}</span><div><CalendarDays size={18}/><input type="date" aria-label={t('Travel date')} min={today} value={date} onChange={e=>setDate(e.target.value)} /></div></label>
+            <label><span>{t('Travellers')}</span><div><Users size={18}/><select aria-label={t('Travellers')} value={travellers} onChange={e=>setTravellers(e.target.value)}><option value="1">{t('1 Guest')}</option><option value="2">{t('2 Guests')}</option><option value="3">{t('3 Guests')}</option><option value="4">{t('4 Guests')}</option><option value="5">{t('5+ Guests')}</option></select></div></label>
             <button type="submit"><Search size={19}/> {t('Search')}</button>
           </form>
+          <Link className="hero-plan-link" to="/planner">{t('Open the trip planner')} <ArrowRight size={15}/></Link>
         </div>
       </section>
 
@@ -265,12 +275,14 @@ function Home({ notify }: { notify: (text:string)=>void }) {
         <div className="section-heading"><div><span className="kicker">{t('EXPLORE RAJASTHAN')}</span><h2>{t('Popular Destinations')}</h2></div><Link to="/explore" className="text-link">{t('View all')} <ArrowRight size={16}/></Link></div>
         <div className="destination-strip">
           {destinations.slice(0,6).map((d,i)=>(
-            <Link className={`destination-card ${i===0?'tall':''}`} to={`/destination/${d.id}`} key={d.id}>
-              <AssetImage record={d.image} showCredit={false} />
-              <div className="card-shade"/>
-              <button className="save-float" onClick={(e)=>{e.preventDefault(); notify(`${d.name} ${t('added to saved places')}`)}} aria-label={`${t('Save')} ${d.name}`}><Heart size={18}/></button>
-              <div className="destination-card-info"><span>{d.city}</span><h3>{d.name}</h3><p><Star size={14} fill="currentColor"/> {d.rating} <b>•</b> {t(d.duration)}</p></div>
-            </Link>
+            <article className={`destination-card ${i===0?'tall':''}`} key={d.id}>
+              <Link className="destination-card-link" to={`/destination/${d.id}`} aria-label={`${d.name}, ${d.city}`}>
+                <AssetImage record={d.image} showCredit={false} />
+                <div className="card-shade"/>
+                <div className="destination-card-info"><span>{d.city}</span><h3>{d.name}</h3><p><Star size={14} fill="currentColor"/> {d.rating} <b>•</b> {t(d.duration)}</p></div>
+              </Link>
+              <button className="save-float" onClick={()=>{const wasSaved=saved.includes(d.id);setSaved(wasSaved?saved.filter((id)=>id!==d.id):[...saved,d.id]);notify(t(wasSaved?'Removed from saved destinations':'Saved destination'))}} aria-pressed={saved.includes(d.id)} aria-label={`${t(saved.includes(d.id)?'Remove saved destination':'Save destination')}: ${d.name}`}><Heart size={18} fill={saved.includes(d.id)?'currentColor':'none'}/></button>
+            </article>
           ))}
         </div>
       </section>
@@ -314,8 +326,6 @@ function Home({ notify }: { notify: (text:string)=>void }) {
           <Link to="/map"><span><Languages/></span><div><strong>{t('Multilingual Guides')}</strong><p>{t('Explore heritage in English or Hindi.')}</p></div></Link>
         </div>
       </section>
-
-      <Footer />
     </>
   )
 }
@@ -367,37 +377,67 @@ function DestinationCard({d,list=false}:{d:Destination;list?:boolean}) {
   const localized=localizedDestination(d,language)
   const [saved,setSaved]=useStored<string[]>('ym-saved-destinations',[])
   const isSaved=saved.includes(d.id)
-  const toggle=(e:ReactMouseEvent)=>{e.preventDefault();setSaved(isSaved?saved.filter(id=>id!==d.id):[...saved,d.id])}
+  const toggle=()=>setSaved(isSaved?saved.filter(id=>id!==d.id):[...saved,d.id])
   return (
-    <Link className={list?'destination-card-list':'destination-card-full'} to={`/destination/${localized.id}`}>
-      <div className="dc-image"><AssetImage record={localized.image} showCredit={false}/><button onClick={toggle} className={isSaved?'saved':''} aria-label={`${t(isSaved?'Remove saved destination':'Save destination')}: ${localized.name}`}><Heart size={17} fill={isSaved?'currentColor':'none'}/></button></div>
+    <article className={list?'destination-card-list':'destination-card-full'}>
+      <div className="dc-image"><Link className="destination-image-link" to={`/destination/${localized.id}`} aria-label={`${t('View Details')}: ${localized.name}`}><AssetImage record={localized.image} showCredit={false}/></Link><button type="button" onClick={toggle} className={isSaved?'saved':''} aria-pressed={isSaved} aria-label={`${t(isSaved?'Remove saved destination':'Save destination')}: ${localized.name}`}><Heart size={17} fill={isSaved?'currentColor':'none'}/></button></div>
       <div className="dc-content">
         <div className="dc-top"><span className="category-pill">{t(localized.category)}</span><span className="rating"><Star size={14} fill="currentColor"/>{localized.rating}</span></div>
-        <h3>{localized.name}</h3><p className="location"><MapPin size={14}/>{localized.city}, {t('Rajasthan, India')}</p>
+        <h3><Link to={`/destination/${localized.id}`}>{localized.name}</Link></h3><p className="location"><MapPin size={14}/>{localized.city}, {t('Rajasthan, India')}</p>
         <p className="dc-description">{localized.description}</p>
         <div className="dc-meta"><span><Ticket size={15}/>{localized.ticket===0?t('Free'):`₹${localized.ticket}`}</span><span><Clock3 size={15}/>{t(localized.hours)}</span></div>
-        <div className="dc-actions"><button className="primary-small">{t('View Details')}</button><span className="map-action"><MapPin size={15}/> {t('Map')}</span></div>
+        <div className="dc-actions"><Link className="primary-small" to={`/destination/${localized.id}`}>{t('View Details')}</Link><a className="map-action" href={`https://www.google.com/maps/search/?api=1&query=${localized.lat},${localized.lng}`} target="_blank" rel="noreferrer"><MapPin size={15}/> {t('Map')}</a></div>
       </div>
-    </Link>
+    </article>
   )
 }
 
 function DestinationDetails({notify}:{notify:(text:string)=>void}) {
   const { language, t } = useI18n()
   const {id}=useParams()
-  const d=localizedDestination(destinations.find(item=>item.id===id)||destinations[0], language)
+  const foundDestination=destinations.find(item=>item.id===id)
+  const d=localizedDestination(foundDestination??destinations[0], language)
   const [saved,setSaved]=useStored<string[]>('ym-saved-destinations',[])
   const isSaved=saved.includes(d.id)
-  const [speaking,setSpeaking]=useState(false)
+  const [audioState,setAudioState]=useState<'idle'|'playing'|'paused'>('idle')
+  const [previewOpen,setPreviewOpen]=useState(false)
+  const narrationRef=useRef<SpeechSynthesisUtterance|null>(null)
+  const previewTriggerRef=useRef<HTMLButtonElement|null>(null)
+  const previewCloseRef=useRef<HTMLButtonElement|null>(null)
+  const nearbyDestinations=destinations.filter((destination)=>destination.city===d.city&&destination.id!==d.id)
 
-  const narrate=()=>{ 
-    if('speechSynthesis' in window){
-      if(speaking){window.speechSynthesis.cancel();setSpeaking(false);return}
-      const utterance=new SpeechSynthesisUtterance(`${d.name}. ${d.history} ${d.architecture} ${d.culture}`)
-      utterance.lang=language === 'हिन्दी' ? 'hi-IN' : 'en-IN'; utterance.onend=()=>setSpeaking(false)
-      window.speechSynthesis.speak(utterance);setSpeaking(true)
-    }else notify(t('Audio narration is not supported by this browser'))
+  useEffect(()=>()=>{window.speechSynthesis?.cancel()},[id])
+  useEffect(()=>{
+    if(!previewOpen)return
+    const previousOverflow=document.body.style.overflow
+    const previewTrigger=previewTriggerRef.current
+    const closeOnEscape=(event:KeyboardEvent)=>{if(event.key==='Escape')setPreviewOpen(false)}
+    document.body.style.overflow='hidden'
+    document.addEventListener('keydown',closeOnEscape)
+    previewCloseRef.current?.focus()
+    return ()=>{document.body.style.overflow=previousOverflow;document.removeEventListener('keydown',closeOnEscape);previewTrigger?.focus()}
+  },[previewOpen])
+
+  const playNarration=()=>{
+    if(!('speechSynthesis' in window)){notify(t('Audio narration is not supported by this browser'));return}
+    if(audioState==='paused'&&narrationRef.current){window.speechSynthesis.resume();setAudioState('playing');return}
+    if(audioState==='playing'){window.speechSynthesis.pause();setAudioState('paused');return}
+    const utterance=new SpeechSynthesisUtterance(`${d.name}. ${d.history} ${d.architecture} ${d.culture}`)
+    utterance.lang=language==='हिन्दी'?'hi-IN':'en-IN'
+    utterance.onend=()=>{narrationRef.current=null;setAudioState('idle')}
+    utterance.onerror=()=>{narrationRef.current=null;setAudioState('idle')}
+    narrationRef.current=utterance
+    window.speechSynthesis.speak(utterance)
+    setAudioState('playing')
   }
+
+  const stopNarration=()=>{
+    window.speechSynthesis?.cancel()
+    narrationRef.current=null
+    setAudioState('idle')
+  }
+
+  if(!foundDestination)return <NotFound/>
 
   return (
     <div className="page destination-page">
@@ -416,56 +456,89 @@ function DestinationDetails({notify}:{notify:(text:string)=>void}) {
           <section><h2>{language === 'हिन्दी' ? `${d.name} का परिचय` : `${t('About')} ${d.name}`}</h2><p>{d.history}</p></section>
           <section className="detail-two-col"><div><h3>{t('Architecture')}</h3><p>{d.architecture}</p></div><div><h3>{t('Cultural Importance')}</h3><p>{d.culture}</p></div></section>
           <section className="detail-two-col"><div><h3>{t('Best time to visit')}</h3><p>{t('October to March is generally more comfortable for sightseeing across Rajasthan. Check a current forecast and venue notices before travel.')}</p></div><div><h3>{t('Visitor tips')}</h3><p>{t('Opening hours, weekly closures and sample ticket prices may change. Confirm with the venue, follow posted access and photography rules, and carry water and sun protection.')}</p></div></section>
-          <section className="gallery"><h2>{t('Photography')}</h2><div><AssetImage record={d.image} showCredit={false}/></div>{d.image.source_url&&<p className="photo-source-link">{t('Photo source')}: <a href={d.image.source_url} target="_blank" rel="noreferrer">{d.image.source_name}</a>{d.image.author&&<> · {d.image.author}</>}{d.image.license&&<> · {d.image.license_url?<a href={d.image.license_url} target="_blank" rel="noreferrer">{d.image.license}</a>:d.image.license}</>}</p>}</section>
+          <section><h2>{t('Nearby attractions')}</h2>{nearbyDestinations.length?<ul className="nearby-destinations">{nearbyDestinations.map((destination)=><li key={destination.id}><Link to={`/destination/${destination.id}`}>{localizedContent(language,'destinations',destination.id,'name',destination.name)}</Link><span>{destination.city}</span></li>)}</ul>:<p>{t('No other listed attractions in this city.')}</p>}</section>
+          <section className="gallery"><h2>{t('Photography')}</h2><p>{t('One verified photograph is available for this listing; a multi-photo gallery is not available yet.')}</p><button ref={previewTriggerRef} type="button" className="destination-photo-preview" aria-label={`${t('Preview photo')}: ${d.name}`} onClick={()=>setPreviewOpen(true)}><AssetImage record={d.image} showCredit={false}/></button>{d.image.source_url&&<p className="photo-source-link">{t('Photo source')}: <a href={d.image.source_url} target="_blank" rel="noreferrer">{d.image.source_name}</a>{d.image.author&&<> · {d.image.author}</>}{d.image.license&&<> · {d.image.license_url?<a href={d.image.license_url} target="_blank" rel="noreferrer">{d.image.license}</a>:d.image.license}</>}</p>}</section>
         </article>
         <aside className="detail-aside">
-          <div className="info-card"><h3>{t('Visitor Information')}</h3><div><span><Clock3/>{t('Sample hours')}</span><strong>{t(d.hours)}</strong></div><div><span><CalendarDays/>{t('Closure notes')}</span><strong>{t(d.closed)}</strong></div><div><span><Ticket/>{t('Sample Indian ticket')}</span><strong>{d.ticket===0?t('Free (verify)'):`₹${d.ticket} ${t('(verify)')}`}</strong></div><div><span><Globe2/>{t('Foreign ticket')}</span><strong>{d.foreignTicket !== undefined ? `₹${d.foreignTicket} ${t('(verify)')}` : t('Not available; verify')}</strong></div><div><span><Clock3/>{t('Visit duration')}</span><strong>{t(d.duration)} {t('suggested')}</strong></div></div>
-          <div className="audio-card"><div className="audio-head"><span><Volume2 size={19}/></span><div><strong>{t('Audio Guide')}</strong><small>{language === 'हिन्दी' ? 'हिन्दी वर्णन · डेमो' : 'English narration · Demo'}</small></div></div><button onClick={narrate}>{speaking?<Pause size={18}/>:<Play size={18}/>} {t(speaking?'Pause':'Play narration')}</button></div>
+          <div className="info-card"><h3>{t('Visitor Information')}</h3><div><span><Clock3/>{t('Sample hours')}</span><strong>{t(d.hours)}</strong></div><div><span><CalendarDays/>{t('Closure notes')}</span><strong>{t(d.closed)}</strong></div><div><span><Ticket/>{t('Sample Indian ticket')}</span><strong>{d.ticket===0?t('Free (verify)'):`₹${d.ticket} ${t('(verify)')}`}</strong></div><div><span><Globe2/>{t('Foreign ticket')}</span><strong>{d.foreignTicket !== undefined ? `₹${d.foreignTicket} ${t('(verify)')}` : t('Not available; verify')}</strong></div><div><span><Ticket/>{t('Booking information')}</span><strong>{t('No official booking integration; confirm directly with the venue.')}</strong></div><div><span><MapPin/>{t('Transport distance')}</span><strong>{t('Not verified; check directions in Google Maps.')}</strong></div><div><span><Clock3/>{t('Visit duration')}</span><strong>{t(d.duration)} {t('suggested')}</strong></div></div>
+          <div className="audio-card"><div className="audio-head"><span><Volume2 size={19}/></span><div><strong>{t('Audio Guide')}</strong><small>{language === 'हिन्दी' ? 'हिन्दी वर्णन · डेमो' : 'English narration · Demo'}</small></div></div><div className="audio-controls"><button aria-label={t(audioState==='playing'?'Pause narration':'Play narration')} onClick={playNarration}>{audioState==='playing'?<Pause size={18}/>:<Play size={18}/>} {t(audioState==='playing'?'Pause':audioState==='paused'?'Resume narration':'Play narration')}</button><button type="button" aria-label={t('Stop narration')} onClick={stopNarration} disabled={audioState==='idle'}><X size={16}/>{t('Stop')}</button></div></div>
           <a className="destination-map-link" href={`https://www.google.com/maps/search/?api=1&query=${d.lat},${d.lng}`} target="_blank" rel="noreferrer"><MapPin size={16}/> {t('Open location in Google Maps')} <ExternalLink size={14}/></a>
         </aside>
       </div>
+      {previewOpen&&<div className="experience-lightbox" role="presentation" onClick={(event)=>{if(event.target===event.currentTarget)setPreviewOpen(false)}}><div className="lightbox-dialog destination-lightbox" role="dialog" aria-modal="true" aria-label={`${t('Image preview')}: ${d.name}`}><button ref={previewCloseRef} type="button" className="lightbox-close" onClick={()=>setPreviewOpen(false)} aria-label={t('Close image preview')}><X/></button><div className="lightbox-image-wrap"><AssetImage record={d.image} label={d.name} className="lightbox-image"/></div><div className="lightbox-caption"><h2>{d.name}</h2><p>{t('Verified destination photograph')}</p></div></div></div>}
     </div>
   )
 }
 
+type MapPlace = {
+  id: string
+  name: string
+  city: string
+  lat: number
+  lng: number
+  image: ImageRecord
+  type: 'Attractions'|'Hotels'|'Food'|'Shopping'
+  destinationId?: string
+  approximate: boolean
+  detail: string
+}
+
+function MapFocus({point}:{point:[number,number]}) {
+  const map=useMap()
+  useEffect(()=>{map.setView(point,Math.max(map.getZoom(),10))},[map,point])
+  return null
+}
+
 function MapPage() {
   const { t } = useI18n()
-  const [selected,setSelected]=useState<Destination>(destinations[0])
-  const [filter,setFilter]=useState('Attractions')
+  const [filter,setFilter]=useState<MapPlace['type']>('Attractions')
+  const [query,setQuery]=useState('')
+  const [selectedId,setSelectedId]=useState('hawa-mahal')
+  const [userLocation,setUserLocation]=useState<[number,number]|null>(null)
+  const [locationMessage,setLocationMessage]=useState('')
+  const allPlaces=useMemo<MapPlace[]>(()=>[
+    ...destinations.map((destination)=>({id:destination.id,name:destination.name,city:destination.city,lat:destination.lat,lng:destination.lng,image:destination.image,type:'Attractions' as const,destinationId:destination.id,approximate:false,detail:destination.description})),
+    ...hotels.flatMap((hotel)=>{const point=getKnownCityPoint(hotel.city);return point?[{id:hotel.id,name:hotel.name,city:hotel.city,lat:point.lat,lng:point.lng,image:hotel.image,type:'Hotels' as const,approximate:true,detail:'Sample hotel listing; the pin marks an approximate city centre, not the property address.'}]:[]}),
+    ...experiences.flatMap((experience)=>{const point=getKnownCityPoint(experience.city);return point?[{id:experience.id,name:experience.name,city:experience.city,lat:point.lat,lng:point.lng,image:experience.image,type:experience.type==='Food'?'Food' as const:'Shopping' as const,approximate:true,detail:'Local food or craft suggestion; the pin marks an approximate city centre, not a verified vendor.'}]:[]}),
+  ],[])
+  const filteredPlaces=allPlaces.filter((place)=>place.type===filter&&`${place.name} ${place.city}`.toLowerCase().includes(query.toLowerCase()))
+  const selected=filteredPlaces.find((place)=>place.id===selectedId)??filteredPlaces[0]
+  const selectedPoint:[number,number]=selected?[selected.lat,selected.lng]:[26.9124,75.7873]
+  const directionsUrl=selected?`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${selected.lat},${selected.lng}`)}`:''
+  const locate=()=>{
+    if(!navigator.geolocation){setLocationMessage(t('Location is not available in this browser.'));return}
+    navigator.geolocation.getCurrentPosition(
+      (position)=>{setUserLocation([position.coords.latitude,position.coords.longitude]);setLocationMessage(t('Your location is shown only in this browser session.'))},
+      ()=>setLocationMessage(t('Location permission was denied or could not be determined.')),
+      {enableHighAccuracy:false,timeout:10000,maximumAge:60000},
+    )
+  }
   return (
     <div className="map-page">
       <div className="map-sidebar">
-        <div className="map-search"><Search size={17}/><input aria-label={t('Search Rajasthan')} placeholder={t('Search Rajasthan')}/><button aria-label={t('Filter')}><SlidersHorizontal size={16}/></button></div>
-        <div className="map-filter"><button className={filter==='Attractions'?'active':''} onClick={()=>setFilter('Attractions')}><Landmark/>{t('Attractions')}</button><button className={filter==='Hotels'?'active':''} onClick={()=>setFilter('Hotels')}><Hotel/>{t('Hotels')}</button><button className={filter==='Food'?'active':''} onClick={()=>setFilter('Food')}><Utensils/>{t('Food')}</button></div>
-        <div className="map-results"><p>{filter==='Attractions'?`${destinations.length} ${t('places found')}`:filter==='Hotels'?`${hotels.length} ${t('sample hotels found')}`:t('Sample food experiences')}</p>
-          {(filter==='Attractions'?destinations.slice(0,8):filter==='Hotels'?hotels:experiences.filter(item=>item.type==='Food').slice(0,8)).map((item:any)=>{
-            const imageKind = 'type' in item ? item.type === 'Food' ? 'food' : 'shopping' : 'ticket' in item ? undefined : 'hotel'
-            return (
-              <button className="map-place" key={item.id} onClick={()=>{if('lat' in item)setSelected(item)}}>
-                <AssetImage record={item.image} kind={imageKind} showCredit={'ticket' in item ? false : undefined}/>
-                <div><strong>{item.name}</strong><span><MapPin size={12}/>{item.city}</span>{'rating' in item&&<small>★ {item.rating} • {item.ticket?`₹${item.ticket}`:`₹${item.price}/night`}</small>}</div>
-              </button>
-            )
-          })}
+        <h1 className="visually-hidden">{t('Explore Rajasthan on the map')}</h1>
+        <div className="map-search"><Search size={17}/><input aria-label={t('Search Rajasthan')} value={query} onChange={(event)=>setQuery(event.target.value)} placeholder={t('Search Rajasthan')}/></div>
+        <div className="map-filter">{(['Attractions','Hotels','Food','Shopping'] as const).map((type)=><button key={type} className={filter===type?'active':''} onClick={()=>{setFilter(type);setSelectedId('')}} aria-pressed={filter===type}>{type==='Attractions'?<Landmark/>:type==='Hotels'?<Hotel/>:type==='Food'?<Utensils/>:<ShoppingBag/>}{t(type)}</button>)}</div>
+        <div className="map-results"><p>{filteredPlaces.length} {t('places found')}</p>
+          {filteredPlaces.map((place)=>(
+            <button className={selected?.id===place.id?'map-place selected':'map-place'} key={place.id} onClick={()=>setSelectedId(place.id)} aria-pressed={selected?.id===place.id}>
+              <AssetImage record={place.image} kind={place.type==='Food'?'food':place.type==='Hotels'?'hotel':place.type==='Shopping'?'shopping':undefined} showCredit={false}/>
+              <div><strong>{place.name}</strong><span><MapPin size={12}/>{place.city}</span>{place.approximate&&<small>{t('Approximate city location')}</small>}</div>
+            </button>
+          ))}
+          {!filteredPlaces.length&&<p className="map-empty">{t('No matching places found.')}</p>}
         </div>
       </div>
       <div className="leaflet-wrap">
-        <iframe
-          title="OpenStreetMap Rajasthan"
-          src={`https://www.openstreetmap.org/export/embed.html?bbox=69.3,24.0,77.2,28.4&layer=mapnik&marker=${selected.lat},${selected.lng}`}
-        />
-        <div className="map-marker-layer" aria-label={t('Rajasthan attraction markers')}>
-          {destinations.slice(0,10).map(d=>{
-            const left=Math.min(92,Math.max(8,((d.lng-69.5)/7.5)*100))
-            const top=Math.min(88,Math.max(12,((28.2-d.lat)/4.2)*100))
-            return <button key={d.id} className={selected.id===d.id?'map-marker active':'map-marker'} style={{left:`${left}%`,top:`${top}%`}} onClick={()=>setSelected(d)} aria-label={d.name}/>
-          })}
-        </div>
-        <div className="marker-popup-card">
-          <AssetImage record={selected.image} showCredit={false}/>
-          <div><strong>{selected.name}</strong><span>{t(selected.hours)} • {selected.ticket===0?t('Free'):`₹${selected.ticket}`}</span><small>{t(selected.duration)} {t('suggested')}</small><Link to={`/destination/${selected.id}`}>{t('View details')} <ArrowRight size={13}/></Link></div>
-        </div>
-        <button className="location-button" onClick={()=>navigator.geolocation?.getCurrentPosition(()=>{})}><LocateFixed size={18}/> {t('My location')}</button>
+        <MapContainer className="discovery-leaflet" center={selectedPoint} zoom={7} scrollWheelZoom>
+          <TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"/>
+          {selected&&<MapFocus point={selectedPoint}/>}
+          {filteredPlaces.map((place)=><CircleMarker key={place.id} center={[place.lat,place.lng]} radius={selected?.id===place.id?9:6} pathOptions={{color:'#fff',weight:2,fillColor:place.type==='Attractions'?'#d96b27':'#25345b',fillOpacity:.9}} eventHandlers={{click:()=>setSelectedId(place.id)}}><Popup><strong>{place.name}</strong><br/>{place.city}{place.approximate&&<><br/>{t('Approximate city location')}</>}</Popup></CircleMarker>)}
+          {userLocation&&<CircleMarker center={userLocation} radius={8} pathOptions={{color:'#fff',weight:2,fillColor:'#237a57',fillOpacity:1}}><Popup>{t('Your location')}</Popup></CircleMarker>}
+        </MapContainer>
+        {selected&&<div className="map-selected-card"><AssetImage record={selected.image} showCredit={false}/><div><strong>{selected.name}</strong><span>{selected.city} · {selected.type==='Attractions'?t('Verified attraction coordinates'):t('Approximate city location')}</span><small>{selected.detail}</small><div>{selected.destinationId&&<Link to={`/destination/${selected.destinationId}`}>{t('View details')} <ArrowRight size={13}/></Link>}<a href={directionsUrl} target="_blank" rel="noreferrer">{t('Get directions')} <ExternalLink size={12}/></a></div></div></div>}
+        <button className="location-button" onClick={locate}><LocateFixed size={18}/> {t('My location')}</button>
+        {locationMessage&&<div className="map-location-message" role="status">{locationMessage}</div>}
         <div className="map-demo-note">{t('OpenStreetMap demo · Sample location data')}</div>
       </div>
     </div>
@@ -480,8 +553,16 @@ function getSchedulePeriod(time: string) {
 let plannerTripSequence = 0
 
 function initialPlannerForm(): PlannerForm {
+  const params=new URLSearchParams(window.location.search)
+  const requestedDestination=params.get('destination')?.trim()
+  const matchingDestinations=requestedDestination
+    ? destinations.filter((destination)=>destination.city.toLowerCase()===requestedDestination.toLowerCase()||destination.name.toLowerCase()===requestedDestination.toLowerCase()||destination.name.toLowerCase().includes(requestedDestination.toLowerCase()))
+    : []
+  const requestedCities=[...new Set(matchingDestinations.map((destination)=>destination.city))]
   const start = new Date()
   start.setDate(start.getDate() + 7)
+  const requestedDate=params.get('date')??''
+  if(/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)&&!Number.isNaN(Date.parse(`${requestedDate}T00:00:00`)))start.setTime(new Date(`${requestedDate}T00:00:00`).getTime())
   const end = new Date(start)
   end.setDate(end.getDate() + 2)
   const dateValue = (date: Date) => {
@@ -490,12 +571,13 @@ function initialPlannerForm(): PlannerForm {
     const day = String(date.getDate()).padStart(2, '0')
     return `${year}-${month}-${day}`
   }
+  const requestedTravelers=Number(params.get('travelers'))
   return {
     origin: 'Jaipur',
-    cities: ['Jaipur'],
+    cities: requestedDestination ? requestedCities : ['Jaipur'],
     startDate: dateValue(start),
     endDate: dateValue(end),
-    travelers: 2,
+    travelers: Number.isInteger(requestedTravelers)&&requestedTravelers>=1&&requestedTravelers<=20?requestedTravelers:2,
     budget: 25000,
     preferences: ['Forts and palaces', 'Historical places', 'Local food'],
     travelType: 'Family',
@@ -1296,14 +1378,33 @@ function TripPlanner({notify}:{notify:(text:string)=>void}) {
 function TravelBuddies({notify}:{notify:(text:string)=>void}) {
   const { language, setLanguage, t } = useI18n()
   const [destination,setDestination]=useState('All')
+  const [travelStyle,setTravelStyle]=useState('All')
+  const [interest,setInterest]=useState('All')
+  const [budget,setBudget]=useState('All')
+  const [travelDate,setTravelDate]=useState('')
   const [tab,setTab]=useState<'matches'|'requests'|'buddies'|'chat'>('matches')
   const [requests,setRequests]=useStored<string[]>('ym-buddy-requests',[])
+  const [incomingRequests,setIncomingRequests]=useStored<string[]>('ym-buddy-incoming-requests',['b3'])
   const [connected,setConnected]=useStored<string[]>('ym-buddy-connected',[])
   const [chatPerson,setChatPerson]=useState(buddyProfiles[0])
   const [messages,setMessages]=useStored<{from:string;text:string}[]>('ym-chat-messages',[{from:'buddy',text:'Hi! Are you planning to explore Jaipur heritage places?'},{from:'me',text:'Yes, I am visiting in December.'}])
   const [message,setMessage]=useState('')
   const [translated,setTranslated]=useState(false)
-  const profiles=buddyProfiles.filter(p=>destination==='All'||p.destination===destination)
+  const dateMatches=(dates:string)=>{
+    if(!travelDate)return true
+    const selected=new Date(`${travelDate}T12:00:00`)
+    const selectedDay=selected.getDate()
+    const selectedMonth=selected.toLocaleString('en-US',{month:'short'}).toLowerCase()
+    const range=dates.match(/^(\d{1,2})-(\d{1,2}) ([A-Za-z]{3})$/)
+    return Boolean(range&&range[3]?.toLowerCase()===selectedMonth&&selectedDay>=Number(range[1])&&selectedDay<=Number(range[2]))
+  }
+  const profiles=buddyProfiles.filter((p)=>{
+    const matchesDestination=destination==='All'||p.destination===destination
+    const matchesStyle=travelStyle==='All'||p.category===travelStyle
+    const matchesInterest=interest==='All'||p.interests.includes(interest)
+    const matchesBudget=budget==='All'||(budget==='under-1500'&&p.budgetPerDay<1500)||(budget==='1500-3000'&&p.budgetPerDay>=1500&&p.budgetPerDay<=3000)||(budget==='over-3000'&&p.budgetPerDay>3000)
+    return matchesDestination&&matchesStyle&&matchesInterest&&matchesBudget&&dateMatches(p.dates)
+  })
   const localizedProfiles=profiles.map((p)=>({...p,intro:localizedContent(language,'buddies',p.id,'intro',p.intro),interests:p.interests.map((interest)=>t(interest)),category:localizedContent(language,'buddies',p.id,'group',p.category)}))
   const activeChatPerson=buddyProfiles.find((p)=>p.id===chatPerson.id)??chatPerson
   const localizedChatPerson={...activeChatPerson,intro:localizedContent(language,'buddies',activeChatPerson.id,'intro',activeChatPerson.intro),interests:activeChatPerson.interests.map((interest)=>t(interest)),category:localizedContent(language,'buddies',activeChatPerson.id,'group',activeChatPerson.category)}
@@ -1312,11 +1413,25 @@ function TravelBuddies({notify}:{notify:(text:string)=>void}) {
     <div className="page buddy-page">
       <div className="buddy-head"><div><span className="kicker">{t('TRAVEL TOGETHER')}</span><h1>{t('Find your Travel Buddy')}</h1><p>{t('Meet compatible travellers through mutual consent.')}</p></div><button onClick={()=>notify(t('Demo profile opened'))}><CircleUserRound size={17}/> {t('My profile')}</button></div>
       <div className="container">
-        <div className="buddy-tabs"><button className={tab==='matches'?'active':''} onClick={()=>setTab('matches')}><Compass size={16}/> {t('Matches')}</button><button className={tab==='requests'?'active':''} onClick={()=>setTab('requests')}><UserPlus size={16}/> {t('Requests')} <span>{requests.length}</span></button><button className={tab==='buddies'?'active':''} onClick={()=>setTab('buddies')}><Users size={16}/> {t('My Buddies')}</button><button className={tab==='chat'?'active':''} onClick={()=>setTab('chat')}><MessageCircle size={16}/> {t('Chat')}</button></div>
-        {tab==='matches'&&<>        <div className="buddy-filters"><select aria-label={t('Destination')} value={destination} onChange={e=>setDestination(e.target.value)}><option value="All">{t('All')}</option>{[...new Set(buddyProfiles.map(p=>p.destination))].map(c=><option key={c}>{c}</option>)}</select><button onClick={()=>notify(t('Demo matching preferences applied'))}><SlidersHorizontal size={16}/> {t('Preferences')}</button></div><div className="buddy-grid">{localizedProfiles.map((p,index)=>{const sent=requests.includes(p.id);return <article className="buddy-card" key={p.id}><div className="buddy-photo"><AssetImage record={p.image} label={`Demo traveler: ${p.name}`} kind="person"/><span>{88-index*3}%<small>{t('Demo match')}</small></span></div><div className="buddy-info"><h3>{p.name}, {p.age}</h3><p><MapPin size={14}/>{p.destination} • {p.dates}</p><p>{p.intro}</p><div className="interest-tags">{p.interests.map(i=><span key={i}>{i}</span>)}</div><div className="buddy-meta"><span><Languages size={13}/>{p.languages.map((spokenLanguage)=>t(spokenLanguage)).join(', ')}</span><span><Users size={13}/>{p.category}</span></div><div className="buddy-actions"><button className="outline" onClick={()=>{setChatPerson(buddyProfiles.find((item)=>item.id===p.id)??buddyProfiles[0]);setTab('chat')}}>{t('View Profile')}</button><button className={sent?'sent':''} onClick={()=>{setRequests(sent?requests.filter(id=>id!==p.id):[...requests,p.id]);notify(t(sent?'Connection request withdrawn':'Connection request sent'))}}>{sent?<Check size={16}/>:<UserPlus size={16}/>} {t(sent?'Request Sent':'Connect')}</button></div></div></article>})}</div></>}
-        {tab==='requests'&&<div className="simple-grid"><div className="panel"><h2>{t('Pending requests')}</h2>{requests.length?buddyProfiles.filter(p=>requests.includes(p.id)).map(p=><div className="request-row" key={p.id}><AssetImage record={p.image} label={`Demo traveler: ${p.name}`} kind="person"/><div><strong>{p.name}</strong><small>{p.destination} • {t(p.category)}</small></div><button onClick={()=>{setConnected([...connected,p.id]);setRequests(requests.filter(id=>id!==p.id));notify(t(`${p.name} accepted`))}}>{t('Accept')}</button><button onClick={()=>{setRequests(requests.filter(id=>id!==p.id));notify(t('Request declined'))}}>{t('Reject')}</button></div>):<div className="empty-inline">{t('No pending requests.')}</div>}</div></div>}
+        <div className="buddy-demo-notice" role="note"><ShieldCheck size={17}/><span>{t('Demo only: all profiles, travel windows, budgets, requests, match explanations and chats are simulated in this browser. No real travellers, identity checks or messaging service are connected.')}</span></div>
+        <div className="buddy-tabs"><button className={tab==='matches'?'active':''} onClick={()=>setTab('matches')}><Compass size={16}/> {t('Matches')}</button><button className={tab==='requests'?'active':''} onClick={()=>setTab('requests')}><UserPlus size={16}/> {t('Requests')} <span>{requests.length+incomingRequests.length}</span></button><button className={tab==='buddies'?'active':''} onClick={()=>setTab('buddies')}><Users size={16}/> {t('My Buddies')}</button><button className={tab==='chat'?'active':''} onClick={()=>setTab('chat')}><MessageCircle size={16}/> {t('Chat')}</button></div>
+        {tab==='matches'&&<>
+          <div className="buddy-filters">
+            <select aria-label={t('Destination')} value={destination} onChange={e=>setDestination(e.target.value)}><option value="All">{t('All destinations')}</option>{[...new Set(buddyProfiles.map(p=>p.destination))].map(c=><option key={c}>{c}</option>)}</select>
+            <label>{t('Travel date')}<input type="date" value={travelDate} onChange={(event)=>setTravelDate(event.target.value)} aria-label={t('Travel date')}/></label>
+            <select aria-label={t('Travel style')} value={travelStyle} onChange={e=>setTravelStyle(e.target.value)}><option value="All">{t('All travel styles')}</option>{[...new Set(buddyProfiles.map(p=>p.category))].map(style=><option key={style}>{t(style)}</option>)}</select>
+            <select aria-label={t('Daily budget')} value={budget} onChange={e=>setBudget(e.target.value)}><option value="All">{t('Any sample budget')}</option><option value="under-1500">{t('Under ₹1,500 / day')}</option><option value="1500-3000">{t('₹1,500–₹3,000 / day')}</option><option value="over-3000">{t('Over ₹3,000 / day')}</option></select>
+            <select aria-label={t('Interest')} value={interest} onChange={e=>setInterest(e.target.value)}><option value="All">{t('Any interest')}</option>{[...new Set(buddyProfiles.flatMap(p=>p.interests))].sort().map(item=><option key={item}>{t(item)}</option>)}</select>
+          </div>
+          <p className="buddy-filter-note">{t('Travel windows have no year in this demo; date filtering compares month and day only. Sample daily budgets are illustrative.')}</p>
+          <div className="buddy-grid">{localizedProfiles.map((p)=>{const sent=requests.includes(p.id);const activeOriginal=buddyProfiles.find((item)=>item.id===p.id);const shared=activeOriginal?.interests.filter((item)=>interest!=='All'&&item===interest)??[];const matchReasons=[destination!=='All'&&p.destination===destination?t('Destination matches your filter'):null,travelStyle!=='All'&&p.category===travelStyle?t('Travel style matches your filter'):null,...shared.map((item)=>`${t('Interest match')}: ${t(item)}`)].filter((reason):reason is string=>Boolean(reason));return <article className="buddy-card" key={p.id}><div className="buddy-photo"><AssetImage record={p.image} label={`${t('Demo profile')}: ${p.name}`} kind="person"/><span>{t('DEMO')}<small>{t('Profile')}</small></span></div><div className="buddy-info"><h3>{p.name}, {p.age}</h3><p><MapPin size={14}/>{p.destination} • {p.dates} · {formatINR(p.budgetPerDay)} {t('/ day')} {t('(sample)')}</p><p>{p.intro}</p><div className="interest-tags">{p.interests.map(i=><span key={i}>{i}</span>)}</div><div className="buddy-match-explanation"><strong>{t('Why this appears')}</strong><span>{matchReasons.length?matchReasons.join(' · '):t('No personal compatibility score is calculated; compare these sample details with your preferences.')}</span></div><div className="buddy-meta"><span><Languages size={13}/>{p.languages.map((spokenLanguage)=>t(spokenLanguage)).join(', ')}</span><span><Users size={13}/>{p.category}</span></div><div className="buddy-actions"><button className="outline" onClick={()=>{setChatPerson(activeOriginal??buddyProfiles[0]);setTab('chat')}}>{t('View Profile')}</button><button className={sent?'sent':''} onClick={()=>{setRequests(sent?requests.filter(id=>id!==p.id):[...requests,p.id]);notify(t(sent?'Connection request withdrawn':'Demo connection request sent'))}}>{sent?<Check size={16}/>:<UserPlus size={16}/>} {t(sent?'Request Sent':'Connect')}</button></div></div></article>})}{!localizedProfiles.length&&<div className="empty-inline">{t('No demo profiles match these filters.')}</div>}</div>
+        </>}
+        {tab==='requests'&&<div className="simple-grid">
+          <div className="panel"><h2>{t('Incoming demo requests')}</h2>{incomingRequests.length?buddyProfiles.filter(p=>incomingRequests.includes(p.id)).map(p=><div className="request-row" key={p.id}><AssetImage record={p.image} label={`${t('Demo profile')}: ${p.name}`} kind="person"/><div><strong>{p.name}</strong><small>{p.destination} • {t(p.category)} · {t('Simulated request')}</small></div><button onClick={()=>{setConnected([...new Set([...connected,p.id])]);setIncomingRequests(incomingRequests.filter(id=>id!==p.id));notify(t('Demo connection accepted'))}}>{t('Accept')}</button><button onClick={()=>{setIncomingRequests(incomingRequests.filter(id=>id!==p.id));notify(t('Demo request rejected'))}}>{t('Reject')}</button></div>):<div className="empty-inline">{t('No simulated incoming requests.')}</div>}</div>
+          <div className="panel"><h2>{t('Sent demo requests')}</h2>{requests.length?buddyProfiles.filter(p=>requests.includes(p.id)).map(p=><div className="request-row sent-request-row" key={p.id}><AssetImage record={p.image} label={`${t('Demo profile')}: ${p.name}`} kind="person"/><div><strong>{p.name}</strong><small>{p.destination} • {t('Simulated request')}</small></div><button onClick={()=>{setRequests(requests.filter(id=>id!==p.id));notify(t('Demo request withdrawn'))}}>{t('Withdraw')}</button></div>):<div className="empty-inline">{t('No sent demo requests.')}</div>}</div>
+        </div>}
         {tab==='buddies'&&<div className="simple-grid"><div className="panel"><h2>{t('Connected Travellers')}</h2>{connected.length?buddyProfiles.filter(p=>connected.includes(p.id)).map(p=><div className="request-row" key={p.id}><AssetImage record={p.image} label={`Demo traveler: ${p.name}`} kind="person"/><div><strong>{p.name}</strong><small>{p.destination}</small></div><button onClick={()=>{setChatPerson(p);setTab('chat')}}>{t('Chat')}</button></div>):<div className="empty-inline">{t('No connected travellers yet. Send a request to start.')}</div>}</div></div>}
-        {tab==='chat'&&<div className="chat-layout"><aside><h3>{t('Messages')}</h3>{buddyProfiles.slice(0,5).map(p=><button className={chatPerson.id===p.id?'active':''} onClick={()=>setChatPerson(p)} key={p.id}><AssetImage record={p.image} label={`Demo traveler: ${p.name}`} kind="person"/><div><strong>{p.name}</strong><small>{p.destination}</small></div></button>)}</aside><section><header><AssetImage record={localizedChatPerson.image} label={`Demo traveler: ${localizedChatPerson.name}`} kind="person"/><div><strong>{localizedChatPerson.name}</strong><small><ShieldCheck size={12}/> {t('Mutual consent demo')}</small></div><select aria-label={t('Display language')} value={language} onChange={(event) => setLanguage(event.target.value as Language)}><option>English</option><option>हिन्दी</option></select></header><div className="chat-messages">{messages.map((m,i)=><div className={`bubble ${m.from==='me'?'me':'them'}`} key={i}>{m.text}{translated&&m.from==='buddy'&&<small>{t('Demo translation: नमस्ते! क्या आप...')}</small>}</div>)}</div><div className="chat-controls"><button onClick={()=>setTranslated(!translated)}><Languages size={15}/>{t(translated?'Hide demo translation':'Translate demo')}</button><div><input value={message} onChange={e=>setMessage(e.target.value)} onKeyDown={e=>e.key==='Enter'&&send()} placeholder={t('Write a message...')}/><button aria-label={t('Send')} onClick={send}><Send size={17}/></button></div></div></section></div>}
+        {tab==='chat'&&<div className="chat-layout"><aside><h3>{t('Demo conversations')}</h3>{buddyProfiles.slice(0,5).map(p=><button className={chatPerson.id===p.id?'active':''} onClick={()=>setChatPerson(p)} key={p.id}><AssetImage record={p.image} label={`${t('Demo profile')}: ${p.name}`} kind="person"/><div><strong>{p.name}</strong><small>{p.destination}</small></div></button>)}</aside><section><header><AssetImage record={localizedChatPerson.image} label={`${t('Demo profile')}: ${localizedChatPerson.name}`} kind="person"/><div><strong>{localizedChatPerson.name}</strong><small><ShieldCheck size={12}/> {t('Simulated messages')}</small></div><select aria-label={t('Display language')} value={language} onChange={(event) => setLanguage(event.target.value as Language)}><option>English</option><option>हिन्दी</option></select></header><div className="chat-messages">{messages.map((m,i)=><div className={`bubble ${m.from==='me'?'me':'them'}`} key={i}>{m.text}{translated&&m.from==='buddy'&&<small>{t('Demo translation: नमस्ते! क्या आप...')}</small>}</div>)}</div><div className="chat-controls"><button onClick={()=>setTranslated(!translated)}><Languages size={15}/>{t(translated?'Hide demo translation':'Translate demo')}</button><div><input value={message} onChange={e=>setMessage(e.target.value)} onKeyDown={e=>e.key==='Enter'&&send()} placeholder={t('Write a simulated message...')}/><button aria-label={t('Send demo message')} onClick={send}><Send size={17}/></button></div></div></section></div>}
       </div>
       <div className="container safety-card"><ShieldCheck size={26}/><div><h3>{t('Travel Buddy privacy & safety')}</h3><p>{t('Connections require mutual acceptance. Never publicly expose personal phone numbers. Blocking and reporting controls should be available before sharing any information. Live location sharing is optional and consent-based.')}</p></div></div>
     </div>
@@ -1457,11 +1572,54 @@ function Profile({user,logout,notify}:{user:{name:string;email:string};logout:()
   )
 }
 
+function InformationPage({page}:{page:'about'|'privacy'|'terms'}) {
+  const {t}=useI18n()
+  const content={
+    about:{eyebrow:'ABOUT YATRAMITRA',title:'Travel Rajasthan with context',sections:[
+      ['Discover with context','YatraMitra brings Rajasthan destination guides, local food and craft ideas, an editable trip planner, traveller discovery and a map into one place.'],
+      ['A prototype, clearly labelled','This project is a frontend prototype. Profiles, stays, costs, opening hours and ticket prices may be sample data; no booking, identity verification or live messaging is provided.'],
+    ]},
+    privacy:{eyebrow:'PRIVACY',title:'Your data and this prototype',sections:[
+      ['Stored in this browser','Demo profile details, saved destinations and trips, buddy requests, and chat messages are stored in browser local storage on this device. They are not synced to a YatraMitra account or server by this prototype.'],
+      ['Your choices','Avoid entering sensitive personal information in demo forms or chats. Clearing this site’s browser storage removes locally saved prototype data. External map and image providers may receive requests when you use their services.'],
+    ]},
+    terms:{eyebrow:'TERMS',title:'Using YatraMitra',sections:[
+      ['Planning information','Destination hours, weekly closures, ticket amounts, accommodation prices, travel times and suggestions are informational estimates or sample data. Confirm current details with the venue or provider before travel. No live availability, booking, reservation or price is promised.'],
+      ['External services and safety','Map directions open third-party services and follow their terms. Use your judgement, follow official venue notices and current local guidance. This prototype is not an emergency service.'],
+    ]},
+  }[page]
+  return <div className="page info-page"><div className="page-hero compact"><div><span className="kicker">{t(content.eyebrow)}</span><h1>{t(content.title)}</h1></div></div><article className="container info-content">{content.sections.map(([heading,body])=><section key={heading}><h2>{t(heading)}</h2><p>{t(body)}</p></section>)}{page==='about'&&<Link className="info-cta" to="/explore">{t('Explore destinations')} <ArrowRight size={16}/></Link>}</article></div>
+}
+
+function FeedbackPage({notify}:{notify:(text:string)=>void}) {
+  const {t}=useI18n()
+  const [topic,setTopic]=useState('Website usability')
+  const [message,setMessage]=useState('')
+  const [error,setError]=useState('')
+  const submit=(event:FormEvent<HTMLFormElement>)=>{
+    event.preventDefault()
+    if(message.trim().length<10){setError(t('Please enter at least 10 characters of feedback.'));return}
+    try{
+      const current=JSON.parse(localStorage.getItem('ym-feedback')??'[]')
+      if(!Array.isArray(current))throw new Error('Stored feedback has an invalid format.')
+      const entry={id:crypto.randomUUID(),topic,message:message.trim(),createdAt:new Date().toISOString()}
+      localStorage.setItem('ym-feedback',JSON.stringify([entry,...current].slice(0,20)))
+      setMessage('')
+      setError('')
+      notify(t('Feedback saved on this device; it has not been sent to a support team.'))
+    }catch(storageError){
+      const detail=storageError instanceof Error?storageError.message:'Browser storage is unavailable.'
+      setError(`${t('Could not save your feedback:')} ${detail}`)
+    }
+  }
+  return <div className="page info-page"><div className="page-hero compact"><div><span className="kicker">{t('HELP US IMPROVE')}</span><h1>{t('Share feedback')}</h1></div></div><div className="container feedback-content"><p>{t('Feedback is saved locally in this browser only. It is not transmitted to YatraMitra.')}</p><form onSubmit={submit}><label>{t('Feedback topic')}<select value={topic} onChange={(event)=>setTopic(event.target.value)}><option>{t('Website usability')}</option><option>{t('Destination information')}</option><option>{t('Accessibility')}</option><option>{t('Something else')}</option></select></label><label>{t('Your feedback')}<textarea value={message} onChange={(event)=>setMessage(event.target.value)} minLength={10} maxLength={1000} rows={6} required placeholder={t('Please do not include passwords, contact details or other sensitive information.')}/></label><small>{message.length}/1000</small>{error&&<p role="alert" className="feedback-error">{error}</p>}<button type="submit">{t('Save feedback')} <Send size={15}/></button></form></div></div>
+}
+
 function NotFound(){const {t}=useI18n();return <div className="empty-state not-found"><Compass/><h1>{t('Page not found')}</h1><Link to="/">{t('Return home')}</Link></div>}
 
 function Footer(){
   const {t}=useI18n()
-  return <footer><div className="footer-brand"><Brand/><p>{t('Explore heritage. Connect cultures. Travel smarter.')}</p><div><a>Instagram</a><a>Facebook</a><a>YouTube</a></div></div><div><h4>{t('Explore')}</h4><Link to="/explore">{t('Destinations')}</Link><Link to="/experiences">{t('Local Experiences')}</Link><Link to="/hotels">{t('Hotels')}</Link></div><div><h4>{t('Plan')}</h4><Link to="/planner">{t('Trip Planner')}</Link><Link to="/buddies">{t('Travel Buddy')}</Link></div><div><h4>{t('Contact')}</h4><p>hello@yatramitra.demo</p><p>+91 90000 00000</p><p>Jaipur, Rajasthan</p></div><div className="footer-bottom"><span>© 2026 YatraMitra. {t('Prototype demo.')}</span><span>{t('Privacy')} • {t('Terms')} • {t('Accessibility')}</span></div></footer>
+  return <footer><div className="footer-brand"><Brand/><p>{t('Explore heritage. Connect cultures. Travel smarter.')}</p></div><nav aria-label={t('Explore')}><h4>{t('Explore')}</h4><Link to="/explore">{t('Destinations')}</Link><Link to="/experiences">{t('Local Experiences')}</Link><Link to="/hotels">{t('Hotels')}</Link><Link to="/map">{t('Map')}</Link></nav><nav aria-label={t('Plan')}><h4>{t('Plan')}</h4><Link to="/planner">{t('Trip Planner')}</Link><Link to="/buddies">{t('Travel Buddy')}</Link></nav><nav aria-label={t('Company information')}><h4>{t('YatraMitra')}</h4><Link to="/about">{t('About')}</Link><Link to="/feedback">{t('Feedback')}</Link><Link to="/privacy">{t('Privacy Policy')}</Link><Link to="/terms">{t('Terms of Use')}</Link></nav><div className="footer-bottom"><span>© 2026 YatraMitra. {t('Prototype demo.')}</span><span>{t('Sample information; verify before travel.')}</span></div></footer>
 }
 
 export default function App(){

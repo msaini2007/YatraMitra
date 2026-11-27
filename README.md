@@ -1,32 +1,35 @@
-# React + TypeScript + Vite
+# YatraMitra
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+YatraMitra is a React and TypeScript prototype for discovering Rajasthan heritage, local food and crafts, planning trips, finding travel companions, and browsing a map. It preserves the project’s indigo, cream and saffron identity and supports English and Hindi.
 
-Currently, two official plugins are available:
+## Run locally
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `tsrs` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```powershell
+npm install
+npm run dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Production checks:
+
+```powershell
+npm run build
+npm run lint
+```
+
+## Routes
+
+- `/` — destination search and featured experiences
+- `/explore` and `/destination/:id` — destination discovery and guides
+- `/planner` — editable itineraries, budget estimates, local saving and route map
+- `/buddies` — simulated traveller matching, requests and chat
+- `/experiences` — food and craft catalogue with image previews
+- `/map` and `/hotels` — destination map and sample hotel listings
+- `/about`, `/privacy`, `/terms`, `/feedback` — project information and local feedback
+
+## Data and integrations
+
+There is no backend, database, account service, booking provider, or live traveller-messaging integration. Demo profile/authentication data, saved itineraries, and buddy interactions remain in browser local storage. Feedback is saved locally and is not transmitted.
+
+OpenStreetMap tiles and the public OSRM routing endpoint support maps and driving-route estimates without an API key; availability and rate limits are controlled by those providers. Google Maps links open externally for directions and searches. Heritage narration uses the browser’s speech-synthesis voices. Verified image records reference Wikimedia Commons; loading and attribution depend on the remote source.
+
+Visitor hours, closures, ticket amounts, sample hotel rates, food/vendor suggestions, and buddy profiles are labelled as unverified or demo data where applicable. Confirm current details with official venues and providers. The app does not claim bookings, live prices, identity verification, emergency response, or real messaging. The browser’s emergency-information panel cites India’s 112 number; it does not verify local service availability.
